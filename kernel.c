@@ -6,7 +6,7 @@
 #include <stddef.h>
 
 void *memcpy(void *dest, const void *src, size_t n);
-
+char newline[3] = {'\n','\r','\0'};
 int strcmp(const char *a, const char *b) __attribute__ ((naked));
 int strcmp(const char *a, const char *b)
 {
@@ -104,6 +104,16 @@ struct task_control_block {
     struct task_control_block **prev;
     struct task_control_block  *next;
 };
+
+    struct task_info
+{
+	size_t *task_count;
+	struct task_control_block *task;
+};
+struct task_info tainfo;
+
+
+
 
 /* 
  * pathserver assumes that all files are FIFOs that were registered
@@ -314,49 +324,119 @@ void queue_str_task2()
 	queue_str_task("Hello 2\n", 50);
 }
 
-void serial_readwrite_task()
+void its (int val, char *str)
 {
-	int fdout, fdin;
-	char str[100];
-	char ch;
-	int curr_char;
-	int done;
+int i=0,j=0;
+char out[10];
 
-	fdout = mq_open("/tmp/mqueue/out", 0);
-	fdin = open("/dev/tty0/in", 0);
-
-	/* Prepare the response message to be queued. */
-	memcpy(str, "Got:", 4);
-
-	while (1) {
-		curr_char = 4;
-		done = 0;
-		do {
-			/* Receive a byte from the RS232 port (this call will
-			 * block). */
-			read(fdin, &ch, 1);
-
-			/* If the byte is an end-of-line type character, then
-			 * finish the string and inidcate we are done.
-			 */
-			if (curr_char >= 98 || (ch == '\r') || (ch == '\n')) {
-				str[curr_char] = '\n';
-				str[curr_char+1] = '\0';
-				done = -1;
-				/* Otherwise, add the character to the
-				 * response string. */
-			}
-			else {
-				str[curr_char++] = ch;
-			}
-		} while (!done);
-
-		/* Once we are done building the response string, queue the
-		 * response to be sent to the RS232 port.
-		 */
-		write(fdout, str, curr_char+1+1);
-	}
+if (val==0)
+{str[0]='0' ;
+ str[1]='\0';
+return;
 }
+
+while (val>0)
+{out[j]='0' + (val % 10);
+ val /= 10;
+ j++;
+}
+
+for(i=0 ; i<j ; i++)
+{str[i]=out[j-1-i]; 
+}
+str[j]='\0' ;
+}
+
+
+void commond (char *cmd)
+{
+
+char str[10];
+if (strncmp(cmd,"help",4)==0)
+{ puts(" echo - show the msg you type\r\n");
+  puts(" ps - show all tasks and its priority\r\n");
+  puts(" hello - print 'Hello World'\r\n");
+  puts(" help - show all avaliable commonds\r\n");    }
+
+else if(strncmp(cmd,"hello",5)==0)
+{ puts("'Hello World'\r\n"); }
+
+
+
+
+else if(strncmp(cmd,"echo",4)==0)
+{
+puts(&cmd[5]);
+puts("\n\r"); }
+
+else if(strncmp(cmd,"ps",2)==0)
+{
+char p_pid[5],p_priority[5];
+int count=0;
+puts("Pid Priority\r\n");
+while(count < *tainfo.task_count)
+{	
+	its(tainfo.task[count].pid,p_pid);
+	its(tainfo.task[count].priority,p_priority);
+	puts(p_pid);
+	puts(" ");
+	puts(p_priority);
+	puts(newline);	
+	count++;
+}
+}
+
+}
+void serial_readwrite_task() 
+{ 
+int fdout, fdin; 
+char str[100]; 
+char ch[5] ,name[1]={'$'}; 
+int curr_char=0; 
+int done;
+
+fdout = mq_open("/tmp/mqueue/out", 0); 
+fdin = open("/dev/tty0/in", 0);
+
+while (1) 
+{
+	write(fdout, name, 2);
+curr_char = 0;
+done = 0;
+do {
+/* Receive a byte from the RS232 port (this call will
+* block). */
+read(fdin, ch, 1);
+
+/* If the byte is an end-of-line type character, then
+* finish the string and inidcate we are done.
+*/
+
+if (curr_char >= 98 || (*ch == '\r') || (*ch == '\n')) {
+str[curr_char] = '\0';
+puts("\n\r");
+done = -1;
+/* Otherwise, add the character to the
+* response string. */
+}
+else {
+write(fdout, ch, 2);
+str[curr_char++] = *ch;
+
+}
+} while (!done);
+
+/* Once we are done building the response string, queue the
+* response to be sent to the RS232 port.
+*/
+//write(fdout, "\r", 2);
+
+commond (str);
+
+}
+}
+
+
 
 void first()
 {
@@ -366,9 +446,11 @@ void first()
 	if (!fork()) setpriority(0, 0), serialout(USART2, USART2_IRQn);
 	if (!fork()) setpriority(0, 0), serialin(USART2, USART2_IRQn);
 	if (!fork()) rs232_xmit_msg_task();
-	if (!fork()) setpriority(0, PRIORITY_DEFAULT - 10), queue_str_task1();
-	if (!fork()) setpriority(0, PRIORITY_DEFAULT - 10), queue_str_task2();
+	/*if (!fork()) setpriority(0, PRIORITY_DEFAULT - 10), queue_str_task1();
+	if (!fork()) setpriority(0, PRIORITY_DEFAULT - 10), queue_str_task2(); */
 	if (!fork()) setpriority(0, PRIORITY_DEFAULT - 10), serial_readwrite_task();
+
+
 
 	setpriority(0, PRIORITY_LIMIT);
 
@@ -684,6 +766,9 @@ int main()
 
 	init_rs232();
 	__enable_irq();
+
+	tainfo.task=tasks;
+	tainfo.task_count=&task_count;
 
 	tasks[task_count].stack = (void*)init_task(stacks[task_count], &first);
 	tasks[task_count].pid = 0;
